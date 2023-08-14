@@ -4,13 +4,43 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"strconv"
 	"strings"
 	"syscall"
 )
 
+
 func main() {
-	fmt.Printf("Percent Used Memory: %d \n", percentMemUsed())
-	fmt.Printf("Percent Used Disk: %d \n", percentDiskUsed())
+	fmt.Println(statusAsJson())
+}
+
+
+func statusAsJson() string {
+	
+	const jsonVersion = "0.1"
+	const memThreshold = 90
+	const diskThreshold = 80
+
+	percentMemUsed := percentMemUsed()
+	percentDiskUsed := percentDiskUsed()
+
+	returnString := "{\"title\": \"vitals-glimpse\",\"version\":" + jsonVersion + ","
+
+	if percentMemUsed < memThreshold {
+		returnString = returnString + fmt.Sprintf("\"mem_status\": \"mem_okay\", \"mem_percent\":")
+	} else {
+		returnString = returnString + fmt.Sprintf("\"mem_status\": \"mem_fail\", \"mem_percent\":")
+	}
+	returnString = returnString + strconv.Itoa(percentMemUsed) + ","
+
+	if percentDiskUsed < diskThreshold {
+		returnString = returnString + fmt.Sprintf("\"disk_status\": \"disk_okay\", \"disk_percent\":")
+	} else {
+		returnString = returnString + fmt.Sprintf("\"disk_status\": \"disk_fail\", \"disk_percent\":")
+	}
+	returnString = returnString + strconv.Itoa(percentDiskUsed) + "}"
+
+	return returnString
 }
 
 
