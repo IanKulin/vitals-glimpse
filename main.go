@@ -35,20 +35,20 @@ func statusAsJson() string {
 	percentMemUsed := percentMemUsed()
 	percentDiskUsed := percentDiskUsed()
 
-	returnString := "{\"title\": \"vitals-glimpse\",\"version\":" + jsonVersion + ","
+	returnString := "{\"title\":\"vitals-glimpse\",\"version\":" + jsonVersion + ","
 
 	if percentMemUsed < memThresholdPercent {
-		returnString = returnString + fmt.Sprintf("\"mem_status\": \"mem_okay\", \"mem_percent\":")
+		returnString = returnString + fmt.Sprintf("\"mem_status\": \"mem_okay\",\"mem_percent\":")
 	} else {
-		returnString = returnString + fmt.Sprintf("\"mem_status\": \"mem_fail\", \"mem_percent\":")
+		returnString = returnString + fmt.Sprintf("\"mem_status\":\"mem_fail\",\"mem_percent\":")
 	}
 	returnString = returnString + fmt.Sprintf("%d,", percentMemUsed)
 
 
 	if percentDiskUsed < diskThresholdPercent {
-		returnString = returnString + fmt.Sprintf("\"disk_status\": \"disk_okay\", \"disk_percent\":")
+		returnString = returnString + fmt.Sprintf("\"disk_status\":\"disk_okay\",\"disk_percent\":")
 	} else {
-		returnString = returnString + fmt.Sprintf("\"disk_status\": \"disk_fail\", \"disk_percent\":")
+		returnString = returnString + fmt.Sprintf("\"disk_status\":\"disk_fail\",\"disk_percent\":")
 	}
 	returnString = returnString + fmt.Sprintf("%d}", percentDiskUsed)
 
