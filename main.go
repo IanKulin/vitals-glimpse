@@ -5,7 +5,6 @@ import (
 	"log"
 	"net/http"
 	"os"
-	"strconv"
 	"strings"
 	"syscall"
 )
@@ -13,13 +12,12 @@ import (
 
 func serveStats(resp http.ResponseWriter, req *http.Request) {
     fmt.Fprintf(resp, statusAsJson())
-    fmt.Println("Served: ", statusAsJson())
 }
 
 
 func handleRequests() {
     http.HandleFunc("/vitals", serveStats)
-    log.Fatal(http.ListenAndServe(":10000", nil))
+    log.Fatal(http.ListenAndServe(":10321", nil))
 }
 
 
@@ -44,14 +42,16 @@ func statusAsJson() string {
 	} else {
 		returnString = returnString + fmt.Sprintf("\"mem_status\": \"mem_fail\", \"mem_percent\":")
 	}
-	returnString = returnString + strconv.Itoa(percentMemUsed) + ","
+	returnString = returnString + fmt.Sprintf("%d,", percentMemUsed)
+
 
 	if percentDiskUsed < diskThresholdPercent {
 		returnString = returnString + fmt.Sprintf("\"disk_status\": \"disk_okay\", \"disk_percent\":")
 	} else {
 		returnString = returnString + fmt.Sprintf("\"disk_status\": \"disk_fail\", \"disk_percent\":")
 	}
-	returnString = returnString + strconv.Itoa(percentDiskUsed) + "}"
+	returnString = returnString + fmt.Sprintf("%d}", percentDiskUsed)
+
 
 	return returnString
 }
