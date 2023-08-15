@@ -38,7 +38,7 @@ func statusAsJson() string {
 	returnString := "{\"title\":\"vitals-glimpse\",\"version\":" + jsonVersion + ","
 
 	if percentMemUsed < memThresholdPercent {
-		returnString = returnString + fmt.Sprintf("\"mem_status\": \"mem_okay\",\"mem_percent\":")
+		returnString = returnString + fmt.Sprintf("\"mem_status\":\"mem_okay\",\"mem_percent\":")
 	} else {
 		returnString = returnString + fmt.Sprintf("\"mem_status\":\"mem_fail\",\"mem_percent\":")
 	}
