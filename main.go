@@ -84,7 +84,7 @@ func percentMemUsed() int {
 	}
 
 	percentAvail := float32(memStats["MemAvailable:"])*100/(float32(memStats["MemTotal:"]))
-	return 100-int(percentAvail)
+	return 99-int(percentAvail)
 }
 
 
@@ -107,5 +107,5 @@ func percentDiskUsed() int {
 	}
 	availableSpace := int(availableBlocks)
 
-	return 100-int(availableSpace*100/totalSpace)
+	return 99-int(availableSpace*100/totalSpace)
 }
