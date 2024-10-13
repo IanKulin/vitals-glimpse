@@ -29,8 +29,18 @@ or if the thresholds are exceeded:
 }
 ```
 
-The threholds for the status keywords are:
+The thresholds for the status keywords are:
 * `mem_okay` - below 90% memory usage
 * `disk_okay` - below 80% disk usage
 
 The disk usage is based on the `/` root mount point
+
+## Building
+- `GOARCH=amd64 GOOS=linux go build`
+
+## testing
+- `scp vitals-glimpse ian@ct390-test:vitals-glimpse`
+- `ssh ian@ct390-test 'chmod +x vitals-glimpse'`
+- `ssh ian@ct390-test 'nohup ./vitals-glimpse > output.log 2>&1 & echo $! > vitals-glimpse.pid'`
+- 'http://ct390-test:10321/vitals"
+- `ssh ian@ct390-test 'kill $(cat vitals-glimpse.pid)'`
