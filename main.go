@@ -12,6 +12,13 @@ import (
 	"time"
 )
 
+const jsonVersion = "0.2"
+const memThresholdPercent = 90
+const diskThresholdPercent = 80
+const cpuThresholdPercent = 90
+const port = ":10321"
+const endPoint = "/vitals"
+
 
 func serveStats(resp http.ResponseWriter, req *http.Request) {
     io.WriteString(resp, statusAsJson())
@@ -19,8 +26,8 @@ func serveStats(resp http.ResponseWriter, req *http.Request) {
 
 
 func handleRequests() {
-    http.HandleFunc("/vitals", serveStats)
-    log.Fatal(http.ListenAndServe(":10321", nil))
+    http.HandleFunc(endPoint, serveStats)
+    log.Fatal(http.ListenAndServe(port, nil))
 }
 
 func main() {
@@ -30,11 +37,6 @@ func main() {
 
 func statusAsJson() string {
 	
-	const jsonVersion = "0.2"
-	const memThresholdPercent = 90
-	const diskThresholdPercent = 80
-	const cpuThresholdPercent = 90
-
 	percentMemUsed := percentMemUsed()
 	percentDiskUsed := percentDiskUsed()
 	percentCpuUsed := percentCpuUsed()
