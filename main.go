@@ -26,7 +26,9 @@ func serveStats(resp http.ResponseWriter, req *http.Request) {
 
 
 func handleRequests() {
+	// serve from root or endpoint
     http.HandleFunc(endPoint, serveStats)
+	http.HandleFunc("/", serveStats)
     log.Fatal(http.ListenAndServe(port, nil))
 }
 
