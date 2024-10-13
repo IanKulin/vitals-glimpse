@@ -14,7 +14,9 @@ A sample response might be:
 	"mem_status": "mem_okay",
 	"mem_percent": 37,
 	"disk_status": "disk_okay",
-	"disk_percent": 15
+	"disk_percent": 15,
+	"cpu_status":"cpu_okay",
+	"cpu_percent":2
 }
 ```
 or if the thresholds are exceeded:
@@ -25,20 +27,23 @@ or if the thresholds are exceeded:
 	"mem_status": "mem_fail",
 	"mem_percent": 91,
 	"disk_status": "disk_fail",
-	"disk_percent": 81
+	"disk_percent": 81,
+	"cpu_status":"cpu_fail",
+	"cpu_percent":92
 }
 ```
 
 The thresholds for the status keywords are:
 * `mem_okay` - below 90% memory usage
 * `disk_okay` - below 80% disk usage
+* `cpu_okay` - below 90% cpu usage
 
 The disk usage is based on the `/` root mount point
 
-## Building
+## Building on M1 MacBook
 - `GOARCH=amd64 GOOS=linux go build`
 
-## testing
+## Testing on Debian LXC
 - `scp vitals-glimpse ian@ct390-test:vitals-glimpse`
 - `ssh ian@ct390-test 'chmod +x vitals-glimpse'`
 - `ssh ian@ct390-test 'nohup ./vitals-glimpse > output.log 2>&1 & echo $! > vitals-glimpse.pid'`
