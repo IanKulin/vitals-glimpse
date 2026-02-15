@@ -49,3 +49,8 @@ The disk usage is based on the `/` root mount point
 - `ssh ian@ct390-test 'nohup ./vitals-glimpse > output.log 2>&1 & echo $! > vitals-glimpse.pid'`
 - 'http://ct390-test:10321/vitals"
 - `ssh ian@ct390-test 'kill $(cat vitals-glimpse.pid)'`
+
+
+## Versions
+- 0.2 MVP
+- 0.3 Container detection for CPU

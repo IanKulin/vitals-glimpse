@@ -6,13 +6,14 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"runtime"
 	"strconv"
 	"strings"
 	"syscall"
 	"time"
 )
 
-const jsonVersion = "0.2"
+const jsonVersion = "0.3"
 const memThresholdPercent = 90
 const diskThresholdPercent = 80
 const cpuThresholdPercent = 90
@@ -157,7 +158,59 @@ func getCPUTimes() (idleTime, totalTime int) {
 	return
 }
 
-func percentCpuUsed() int {
+func isInContainer() bool {
+	// Check if we have container-specific cgroup limits
+	// If cpu.max exists and is set, we're likely in a limited container
+	if data, err := os.ReadFile("/sys/fs/cgroup/cpu.max"); err == nil {
+		line := strings.TrimSpace(string(data))
+		// "max 100000" means no limit (bare metal or unlimited container)
+		// "50000 100000" means limited (50% of 1 CPU)
+		return line != "max 100000" && !strings.HasPrefix(line, "max ")
+	}
+	
+	// Alternative: check if we're in a restricted namespace
+	if data, err := os.ReadFile("/proc/1/cgroup"); err == nil {
+		// If we see paths like "/lxc/ct300" we're in a container
+		return strings.Contains(string(data), "/lxc/") || 
+		       strings.Contains(string(data), "/docker/")
+	}
+	
+	return false
+}
+
+func getCGroupCPUUsage() (int64, error) {
+	contents, err := os.ReadFile("/sys/fs/cgroup/cpu.stat")
+	if err != nil {
+		return 0, err
+	}
+
+	for _, line := range strings.Split(string(contents), "\n") {
+		if strings.HasPrefix(line, "usage_usec") {
+			fields := strings.Fields(line)
+			if len(fields) == 2 {
+				return strconv.ParseInt(fields[1], 10, 64)
+			}
+		}
+	}
+	return 0, nil
+}
+
+func percentCpuUsedCgroup() int {
+	usageStart, _ := getCGroupCPUUsage()
+	time.Sleep(1 * time.Second)
+	usageEnd, _ := getCGroupCPUUsage()
+
+	usageDelta := usageEnd - usageStart
+	numCPUs := runtime.NumCPU()
+	
+	usage := int(100 * float64(usageDelta) / (1000000.0 * float64(numCPUs)))
+	if usage > 100 {
+		usage = 100
+	}
+	return usage
+}
+
+func percentCpuUsedProcStat() int {
 	idleStart, totalStart := getCPUTimes()
 	time.Sleep(1 * time.Second)
 	idleEnd, totalEnd := getCPUTimes()
@@ -165,6 +218,18 @@ func percentCpuUsed() int {
 	idleDelta := idleEnd - idleStart
 	totalDelta := totalEnd - totalStart
 
-	usage := 100 * (totalDelta - idleDelta) / totalDelta
+	if totalDelta == 0 {
+		return 0
+	}
+	
+	usage := int(100 * float64(totalDelta-idleDelta) / float64(totalDelta))
 	return usage
+}
+
+func percentCpuUsed() int {
+	// Use cgroup stats in containers, /proc/stat on bare metal
+	if isInContainer() {
+		return percentCpuUsedCgroup()
+	}
+	return percentCpuUsedProcStat()
 }

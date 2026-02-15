@@ -1,3 +1,11 @@
 {
-  "cSpell.words": ["Bavail", "GOARCH", "iowait", "Kuma", "nohup", "softirq"]
+  "cSpell.words": [
+    "Bavail",
+    "GOARCH",
+    "iowait",
+    "Kuma",
+    "nohup",
+    "softirq",
+    "usec"
+  ]
 }
