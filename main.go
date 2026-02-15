@@ -20,6 +20,8 @@ const cpuThresholdPercent = 90
 const port = ":10321"
 const endPoint = "/vitals"
 
+var runningInContainer bool
+
 
 func serveStats(resp http.ResponseWriter, req *http.Request) {
     io.WriteString(resp, statusAsJson())
@@ -34,6 +36,7 @@ func handleRequests() {
 }
 
 func main() {
+	runningInContainer = isInContainer()
 	handleRequests()
 }
 
@@ -65,7 +68,11 @@ func statusAsJson() string {
 	} else {
 		returnString += "\"cpu_status\":\"cpu_fail\",\"cpu_percent\":"
 	}
-	returnString += fmt.Sprintf("%d}", percentCpuUsed)
+	cpuType := "host"
+	if runningInContainer {
+		cpuType = "container"
+	}
+	returnString += fmt.Sprintf("%d,\"cpu_source\":\"%s\"}", percentCpuUsed, cpuType)
 	
 
 	return returnString
@@ -159,22 +166,36 @@ func getCPUTimes() (idleTime, totalTime int) {
 }
 
 func isInContainer() bool {
-	// Check if we have container-specific cgroup limits
-	// If cpu.max exists and is set, we're likely in a limited container
+	// systemd reliably sets this inside containers
+	if data, err := os.ReadFile("/run/systemd/container"); err == nil {
+		val := strings.TrimSpace(string(data))
+		if val == "lxc" || val == "docker" || val == "oci" {
+			return true
+		}
+	}
+
+	// Docker-specific marker file
+	if _, err := os.Stat("/.dockerenv"); err == nil {
+		return true
+	}
+
+	// Check cgroup v2 cpu limits
 	if data, err := os.ReadFile("/sys/fs/cgroup/cpu.max"); err == nil {
 		line := strings.TrimSpace(string(data))
-		// "max 100000" means no limit (bare metal or unlimited container)
-		// "50000 100000" means limited (50% of 1 CPU)
-		return line != "max 100000" && !strings.HasPrefix(line, "max ")
+		if line != "max 100000" && !strings.HasPrefix(line, "max ") {
+			return true
+		}
 	}
-	
-	// Alternative: check if we're in a restricted namespace
+
+	// Fallback: cgroup v1 paths
 	if data, err := os.ReadFile("/proc/1/cgroup"); err == nil {
-		// If we see paths like "/lxc/ct300" we're in a container
-		return strings.Contains(string(data), "/lxc/") || 
-		       strings.Contains(string(data), "/docker/")
+		content := string(data)
+		if strings.Contains(content, "/lxc/") ||
+			strings.Contains(content, "/docker/") {
+			return true
+		}
 	}
-	
+
 	return false
 }
 
@@ -226,9 +247,14 @@ func percentCpuUsedProcStat() int {
 	return usage
 }
 
+func hasCgroupCPUStats() bool {
+	_, err := os.ReadFile("/sys/fs/cgroup/cpu.stat")
+	return err == nil
+}
+
 func percentCpuUsed() int {
-	// Use cgroup stats in containers, /proc/stat on bare metal
-	if isInContainer() {
+	// Use cgroup stats in containers if available, /proc/stat otherwise
+	if runningInContainer && hasCgroupCPUStats() {
 		return percentCpuUsedCgroup()
 	}
 	return percentCpuUsedProcStat()
