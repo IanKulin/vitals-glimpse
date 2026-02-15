@@ -16,7 +16,8 @@ A sample response might be:
 	"disk_status": "disk_okay",
 	"disk_percent": 15,
 	"cpu_status":"cpu_okay",
-	"cpu_percent":2
+	"cpu_percent":2,
+	"cpu_source":"host"
 }
 ```
 or if the thresholds are exceeded:
@@ -29,7 +30,8 @@ or if the thresholds are exceeded:
 	"disk_status": "disk_fail",
 	"disk_percent": 81,
 	"cpu_status":"cpu_fail",
-	"cpu_percent":92
+	"cpu_percent":92,
+	"cpu_source":"host"
 }
 ```
 
@@ -39,6 +41,8 @@ The thresholds for the status keywords are:
 * `cpu_okay` - below 90% cpu usage
 
 The disk usage is based on the `/` root mount point
+
+`cpu_source` can be `host`, or `container` if it's running inside an LXC or Docker container. This is mostly just debug information.
 
 ## Building on M1 MacBook
 - `GOARCH=amd64 GOOS=linux go build`
