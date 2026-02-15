@@ -34,14 +34,12 @@ or if the thresholds are exceeded:
 	"cpu_percent":92
 }
 ```
+The disk usage is based on the `/` root mount point
 
-The thresholds for the status keywords are:
+The default thresholds for the status keywords are:
 * `mem_okay` - below 90% memory usage
 * `disk_okay` - below 80% disk usage
 * `cpu_okay` - below 90% cpu usage
-
-The disk usage is based on the `/` root mount point
-
 
 ## Command-Line Flags
 
