@@ -1,6 +1,7 @@
 package main
 
 import (
+	"flag"
 	"fmt"
 	"io"
 	"log"
@@ -14,11 +15,12 @@ import (
 )
 
 const jsonVersion = "0.3"
-const memThresholdPercent = 90
-const diskThresholdPercent = 80
-const cpuThresholdPercent = 90
-const port = ":10321"
 const endPoint = "/vitals"
+
+var memThresholdPercent = 90
+var diskThresholdPercent = 80
+var cpuThresholdPercent = 90
+var port = 10321
 
 var runningInContainer bool
 
@@ -32,10 +34,29 @@ func handleRequests() {
 	// serve from root or endpoint
     http.HandleFunc(endPoint, serveStats)
 	http.HandleFunc("/", serveStats)
-    log.Fatal(http.ListenAndServe(port, nil))
+    log.Fatal(http.ListenAndServe(fmt.Sprintf(":%d", port), nil))
 }
 
 func main() {
+	flag.IntVar(&memThresholdPercent, "mem", 90, "memory usage threshold percent")
+	flag.IntVar(&diskThresholdPercent, "disk", 80, "disk usage threshold percent")
+	flag.IntVar(&cpuThresholdPercent, "cpu", 90, "cpu usage threshold percent")
+	flag.IntVar(&port, "port", 10321, "server port")
+	flag.Parse()
+
+	if memThresholdPercent < 1 || memThresholdPercent > 100 {
+		log.Fatalf("invalid -mem value %d: must be between 1 and 100", memThresholdPercent)
+	}
+	if diskThresholdPercent < 1 || diskThresholdPercent > 100 {
+		log.Fatalf("invalid -disk value %d: must be between 1 and 100", diskThresholdPercent)
+	}
+	if cpuThresholdPercent < 1 || cpuThresholdPercent > 100 {
+		log.Fatalf("invalid -cpu value %d: must be between 1 and 100", cpuThresholdPercent)
+	}
+	if port < 1 || port > 65535 {
+		log.Fatalf("invalid -port value %d: must be between 1 and 65535", port)
+	}
+
 	runningInContainer = isInContainer()
 	handleRequests()
 }
