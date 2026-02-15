@@ -61,8 +61,11 @@ Example:
 ```
 
 
-## Building on M1 MacBook
+## Building on MacBook
 - `GOARCH=amd64 GOOS=linux go build`
+- `GOARCH=amd64 GOOS=linux go build -ldflags="-s -w"` for distribution
+
+The `-s -w` flags strip debug info and symbol tables, reducing binary size by ~20-30%.
 
 ## Testing on Debian LXC
 - `scp vitals-glimpse ian@ct390-test:vitals-glimpse`
