@@ -6,6 +6,8 @@ The JSON returned also has status keywords for the memory and disk which makes i
 
 To access the endpoint in a browser, visit `<server name>:10321/vitals` 
 
+## Output
+
 A sample response might be:
 ```
 {
@@ -44,6 +46,21 @@ The disk usage is based on the `/` root mount point
 
 `cpu_source` can be `host`, or `container` if it's running inside an LXC or Docker container. This is mostly just debug information.
 
+## Command-Line Flags
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `-mem` | 90 | Memory usage threshold (percent) |
+| `-disk` | 80 | Disk usage threshold (percent) |
+| `-cpu` | 90 | CPU usage threshold (percent) |
+| `-port` | 10321 | Server port |
+
+Example:
+```
+./vitals-glimpse -mem 85 -disk 70 -cpu 95 -port 8080
+```
+
+
 ## Building on M1 MacBook
 - `GOARCH=amd64 GOOS=linux go build`
 
@@ -57,4 +74,4 @@ The disk usage is based on the `/` root mount point
 
 ## Versions
 - 0.2 MVP
-- 0.3 Container detection for CPU
+- 0.3 Container detection for CPU, flags for thresholds
