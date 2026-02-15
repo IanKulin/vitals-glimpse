@@ -4,6 +4,7 @@
     "GOARCH",
     "iowait",
     "Kuma",
+    "ldflags",
     "nohup",
     "softirq",
     "usec"
