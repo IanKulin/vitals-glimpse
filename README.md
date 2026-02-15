@@ -1,8 +1,8 @@
 # vitals-glimpse
 
-`vitals-glimpse` is a very simple REST API that exposes a Linux host's memory and disk usage as percentages. 
+`vitals-glimpse` is a simple endpoint that exposes a Linux host or container's memory, disk, and cpu usage as percentages. 
 
-The JSON returned also has status keywords for the memory and disk which makes it a good candidate for simple monitoring tools such as [Uptime Kuma](https://github.com/louislam/uptime-kuma) which can provide a binary up/down response based on the presence or absence of a keyword.
+The JSON returned also has status keywords for the memory, disk, and cpu which makes it a good candidate for simple monitoring tools such as [Uptime Kuma](https://github.com/louislam/uptime-kuma) which can provide a binary up/down response based on the presence or absence of a keyword. The thresholds for these have defaults that can be overwritten with command line flags.
 
 To access the endpoint in a browser, visit `<server name>:10321/vitals` 
 
@@ -18,8 +18,7 @@ A sample response might be:
 	"disk_status": "disk_okay",
 	"disk_percent": 15,
 	"cpu_status":"cpu_okay",
-	"cpu_percent":2,
-	"cpu_source":"host"
+	"cpu_percent":2
 }
 ```
 or if the thresholds are exceeded:
@@ -32,8 +31,7 @@ or if the thresholds are exceeded:
 	"disk_status": "disk_fail",
 	"disk_percent": 81,
 	"cpu_status":"cpu_fail",
-	"cpu_percent":92,
-	"cpu_source":"host"
+	"cpu_percent":92
 }
 ```
 
@@ -44,7 +42,6 @@ The thresholds for the status keywords are:
 
 The disk usage is based on the `/` root mount point
 
-`cpu_source` can be `host`, or `container` if it's running inside an LXC or Docker container. This is mostly just debug information.
 
 ## Command-Line Flags
 
