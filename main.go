@@ -89,13 +89,8 @@ func statusAsJson() string {
 	} else {
 		returnString += "\"cpu_status\":\"cpu_fail\",\"cpu_percent\":"
 	}
-	cpuType := "host"
-	if runningInContainer {
-		cpuType = "container"
-	}
-	returnString += fmt.Sprintf("%d,\"cpu_source\":\"%s\"}", percentCpuUsed, cpuType)
+	returnString += fmt.Sprintf("%d}", percentCpuUsed)
 	
-
 	return returnString
 }
 
