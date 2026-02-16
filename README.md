@@ -73,3 +73,4 @@ The `-s -w` flags strip debug info and symbol tables, reducing binary size by ~2
 ## Versions
 - 0.2 MVP
 - 0.3 Container detection for CPU, flags for thresholds
+- 0.4 Security

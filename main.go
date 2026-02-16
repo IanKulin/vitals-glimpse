@@ -1,20 +1,23 @@
 package main
 
 import (
+	"crypto/subtle"
 	"flag"
 	"fmt"
 	"io"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"runtime"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 )
 
-const jsonVersion = "0.3"
+const jsonVersion = "0.4"
 const endPoint = "/vitals"
 
 var memThresholdPercent = 90
@@ -22,7 +25,103 @@ var diskThresholdPercent = 80
 var cpuThresholdPercent = 90
 var port = 10321
 
+var bindAddr = "0.0.0.0"
+var apiKey string
+var allowCIDRs string
+var allowedNets []*net.IPNet
+var rateLimit int
+
 var runningInContainer bool
+
+type rateLimiter struct {
+	mu        sync.Mutex
+	counts    map[string]int
+	lastClean int64
+}
+
+var limiter = &rateLimiter{counts: make(map[string]int)}
+
+func (rl *rateLimiter) allow(ip string) bool {
+	rl.mu.Lock()
+	defer rl.mu.Unlock()
+
+	now := time.Now().Unix() / 60
+	key := ip + "|" + strconv.FormatInt(now, 10)
+
+	if now != rl.lastClean {
+		suffix := "|" + strconv.FormatInt(now, 10)
+		for k := range rl.counts {
+			if !strings.HasSuffix(k, suffix) {
+				delete(rl.counts, k)
+			}
+		}
+		rl.lastClean = now
+	}
+
+	rl.counts[key]++
+	return rl.counts[key] <= rateLimit
+}
+
+func requireKey(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if apiKey != "" {
+			provided := r.Header.Get("X-API-Key")
+			if subtle.ConstantTimeCompare([]byte(provided), []byte(apiKey)) != 1 {
+				http.Error(w, "Unauthorized", http.StatusUnauthorized)
+				return
+			}
+		}
+		next(w, r)
+	}
+}
+
+func requireAllowedIP(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if len(allowedNets) > 0 {
+			host, _, _ := net.SplitHostPort(r.RemoteAddr)
+			ip := net.ParseIP(host)
+			allowed := false
+			for _, n := range allowedNets {
+				if n.Contains(ip) {
+					allowed = true
+					break
+				}
+			}
+			if !allowed {
+				http.Error(w, "Forbidden", http.StatusForbidden)
+				return
+			}
+		}
+		next(w, r)
+	}
+}
+
+func isAllowedIP(r *http.Request) bool {
+	if len(allowedNets) == 0 {
+		return false
+	}
+	host, _, _ := net.SplitHostPort(r.RemoteAddr)
+	ip := net.ParseIP(host)
+	for _, n := range allowedNets {
+		if n.Contains(ip) {
+			return true
+		}
+	}
+	return false
+}
+
+func rateCheck(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if rateLimit > 0 && !isAllowedIP(r) {
+			host, _, _ := net.SplitHostPort(r.RemoteAddr)
+			if !limiter.allow(host) {
+				http.Error(w, "Too Many Requests", http.StatusTooManyRequests)
+				return
+			}
+		}
+		next(w, r)
+	}
+}
 
 
 func serveStats(resp http.ResponseWriter, req *http.Request) {
@@ -31,10 +130,33 @@ func serveStats(resp http.ResponseWriter, req *http.Request) {
 
 
 func handleRequests() {
-	// serve from root or endpoint
-    http.HandleFunc(endPoint, serveStats)
-	http.HandleFunc("/", serveStats)
-    log.Fatal(http.ListenAndServe(fmt.Sprintf(":%d", port), nil))
+	handler := requireAllowedIP(rateCheck(requireKey(serveStats)))
+	http.HandleFunc(endPoint, handler)
+	http.HandleFunc("/", handler)
+
+	addr := fmt.Sprintf("%s:%d", bindAddr, port)
+	log.Printf("vitals-glimpse listening on %s", addr)
+	if apiKey != "" {
+		log.Println("  API key: required")
+	}
+	if len(allowedNets) > 0 {
+		cidrs := make([]string, len(allowedNets))
+		for i, n := range allowedNets {
+			cidrs[i] = n.String()
+		}
+		log.Printf("  Allowed CIDRs: %s", strings.Join(cidrs, ", "))
+	}
+	if rateLimit > 0 {
+		log.Printf("  Rate limit: %d req/min per IP", rateLimit)
+	}
+
+	server := &http.Server{
+		Addr:         addr,
+		ReadTimeout:  5 * time.Second,
+		WriteTimeout: 10 * time.Second,
+		IdleTimeout:  30 * time.Second,
+	}
+	log.Fatal(server.ListenAndServe())
 }
 
 func main() {
@@ -42,6 +164,10 @@ func main() {
 	flag.IntVar(&diskThresholdPercent, "disk", 80, "disk usage threshold percent")
 	flag.IntVar(&cpuThresholdPercent, "cpu", 90, "cpu usage threshold percent")
 	flag.IntVar(&port, "port", 10321, "server port")
+	flag.StringVar(&bindAddr, "bind", "0.0.0.0", "address to bind to")
+	flag.StringVar(&apiKey, "key", "", "API key required via X-API-Key header")
+	flag.StringVar(&allowCIDRs, "allow", "", "comma-separated CIDR allowlist (e.g. \"10.0.0.0/24,192.168.1.0/24\")")
+	flag.IntVar(&rateLimit, "ratelimit", 60, "max requests per IP per minute (0 to disable)")
 	flag.Parse()
 
 	if memThresholdPercent < 1 || memThresholdPercent > 100 {
@@ -55,6 +181,27 @@ func main() {
 	}
 	if port < 1 || port > 65535 {
 		log.Fatalf("invalid -port value %d: must be between 1 and 65535", port)
+	}
+	if rateLimit < 0 {
+		log.Fatalf("invalid -ratelimit value %d: must be >= 0", rateLimit)
+	}
+
+	if allowCIDRs != "" {
+		for _, cidr := range strings.Split(allowCIDRs, ",") {
+			cidr = strings.TrimSpace(cidr)
+			if !strings.Contains(cidr, "/") {
+				if strings.Contains(cidr, ":") {
+					cidr += "/128"
+				} else {
+					cidr += "/32"
+				}
+			}
+			_, network, err := net.ParseCIDR(cidr)
+			if err != nil {
+				log.Fatalf("invalid -allow CIDR %q: %v", cidr, err)
+			}
+			allowedNets = append(allowedNets, network)
+		}
 	}
 
 	runningInContainer = isInContainer()
