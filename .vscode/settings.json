@@ -1,12 +1,17 @@
 {
   "cSpell.words": [
     "Bavail",
+    "Fatalf",
     "GOARCH",
     "iowait",
     "Kuma",
     "ldflags",
     "nohup",
     "softirq",
+    "Statfs",
+    "strconv",
+    "syscall",
+    "syscalls",
     "usec"
   ]
 }
