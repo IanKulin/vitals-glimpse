@@ -12,26 +12,30 @@ A sample response might be:
 ```
 {
 	"title": "vitals-glimpse",
-	"version": 0.4,
+	"version": 0.5,
 	"mem_status": "mem_okay",
 	"mem_percent": 37,
 	"disk_status": "disk_okay",
 	"disk_percent": 15,
-	"cpu_status":"cpu_okay",
-	"cpu_percent":2
+	"cpu_status": "cpu_okay",
+	"cpu_percent": 2,
+	"disk_iops_status": "disk_iops_okay",
+	"disk_iops": 312
 }
 ```
 or if the thresholds are exceeded:
 ```
 {
 	"title": "vitals-glimpse",
-	"version": 0.4,
+	"version": 0.5,
 	"mem_status": "mem_fail",
 	"mem_percent": 91,
 	"disk_status": "disk_fail",
 	"disk_percent": 81,
-	"cpu_status":"cpu_fail",
-	"cpu_percent":92
+	"cpu_status": "cpu_fail",
+	"cpu_percent": 92,
+	"disk_iops_status": "disk_iops_fail",
+	"disk_iops": 850
 }
 ```
 The disk usage is based on the `/` root mount point.
@@ -39,7 +43,8 @@ The disk usage is based on the `/` root mount point.
 The default thresholds for the status keywords are:
 * `mem_okay` - below 90% memory usage
 * `disk_okay` - below 80% disk usage
-* `cpu_okay` - below 90% cpu usage
+* `cpu_okay` - below 90% CPU usage
+* `disk_iops_okay` - below 400 IOPS (reads + writes per second)
 
 ## Command-Line Flags
 
@@ -48,6 +53,8 @@ The default thresholds for the status keywords are:
 | `-mem` | 90 | Memory usage threshold (percent) |
 | `-disk` | 80 | Disk usage threshold (percent) |
 | `-cpu` | 90 | CPU usage threshold (percent) |
+| `-disk_iops` | 400 | IOPS threshold (reads + writes per second) |
+| `-iodev` | _(auto)_ | Device name to measure (e.g. `sda`). Auto-detected if omitted. |
 | `-port` | 10321 | Server port |
 | `-bind` | `0.0.0.0` | Address to bind to |
 | `-key` | _(none)_ | API key required via `X-API-Key` request header |
@@ -113,8 +120,13 @@ Requests exceeding the limit receive `429 Too Many Requests`.
 The `-s -w` flags strip debug info and symbol tables, reducing binary size by ~20-30%.
 
 ### Testing on Debian LXC
+Remove an installed version
+- `sudo systemctl stop vitals-glimpse`
+- `sudo systemctl disable vitals-glimpse`
+Copy up the new one
 - `scp vitals-glimpse ian@ct390-test:vitals-glimpse`
 - `ssh ian@ct390-test 'chmod +x vitals-glimpse'`
+Run it in the background if you're not going to just ssh n and run it manually
 - `ssh ian@ct390-test 'nohup ./vitals-glimpse > output.log 2>&1 & echo $! > vitals-glimpse.pid'`
 - `http://ct390-test:10321/vitals`
 - `ssh ian@ct390-test 'kill $(cat vitals-glimpse.pid)'`
@@ -124,3 +136,4 @@ The `-s -w` flags strip debug info and symbol tables, reducing binary size by ~2
 - 0.2 MVP
 - 0.3 Container detection for CPU, flags for thresholds
 - 0.4 Security (API key auth, IP allowlisting, rate limiting, HTTP timeouts)
+- 0.5 Disk IOPS metric (reads + writes/sec from `/proc/diskstats`, concurrent measurement)

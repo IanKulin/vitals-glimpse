@@ -17,13 +17,17 @@ import (
 	"time"
 )
 
-const jsonVersion = "0.4"
+const jsonVersion = "0.5"
 const endPoint = "/vitals"
 
 var memThresholdPercent = 90
 var diskThresholdPercent = 80
 var cpuThresholdPercent = 90
+var diskIOPSThreshold = 400
 var port = 10321
+
+var iodev string
+var selectedIODev string
 
 var bindAddr = "0.0.0.0"
 var apiKey string
@@ -135,7 +139,7 @@ func handleRequests() {
 	http.HandleFunc("/", handler)
 
 	addr := fmt.Sprintf("%s:%d", bindAddr, port)
-	log.Printf("vitals-glimpse listening on %s", addr)
+	log.Printf("vitals-glimpse v%s listening on %s", jsonVersion, addr)
 	if apiKey != "" {
 		log.Println("  API key: required")
 	}
@@ -148,6 +152,11 @@ func handleRequests() {
 	}
 	if rateLimit > 0 {
 		log.Printf("  Rate limit: %d req/min per IP", rateLimit)
+	}
+	if selectedIODev != "" {
+		log.Printf("  Disk IOPS device: %s", selectedIODev)
+	} else {
+		log.Println("  Disk IOPS: no device found")
 	}
 
 	server := &http.Server{
@@ -168,6 +177,8 @@ func main() {
 	flag.StringVar(&apiKey, "key", "", "API key required via X-API-Key header")
 	flag.StringVar(&allowCIDRs, "allow", "", "comma-separated CIDR allowlist (e.g. \"10.0.0.0/24,192.168.1.0/24\")")
 	flag.IntVar(&rateLimit, "ratelimit", 60, "max requests per IP per minute (0 to disable)")
+	flag.IntVar(&diskIOPSThreshold, "disk_iops", 400, "IOPS threshold for pass/fail")
+	flag.StringVar(&iodev, "iodev", "", "device name to measure (e.g. sda). Auto-detected if empty.")
 	flag.Parse()
 
 	if memThresholdPercent < 1 || memThresholdPercent > 100 {
@@ -184,6 +195,9 @@ func main() {
 	}
 	if rateLimit < 0 {
 		log.Fatalf("invalid -ratelimit value %d: must be >= 0", rateLimit)
+	}
+	if diskIOPSThreshold < 1 || diskIOPSThreshold > 10000000 {
+		log.Fatalf("invalid -disk_iops value %d: must be between 1 and 10000000", diskIOPSThreshold)
 	}
 
 	if allowCIDRs != "" {
@@ -205,15 +219,27 @@ func main() {
 	}
 
 	runningInContainer = isInContainer()
+
+	if iodev != "" {
+		selectedIODev = iodev
+	} else {
+		selectedIODev = findPrimaryDisk()
+	}
+
 	handleRequests()
 }
 
 
 func statusAsJson() string {
-	
 	percentMemUsed := percentMemUsed()
 	percentDiskUsed := percentDiskUsed()
-	percentCpuUsed := percentCpuUsed()
+
+	var cpuResult, iopsResult int
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() { defer wg.Done(); cpuResult = percentCpuUsed() }()
+	go func() { defer wg.Done(); iopsResult = diskIOPS() }()
+	wg.Wait()
 
 	returnString := "{\"title\":\"vitals-glimpse\",\"version\":" + jsonVersion + ","
 
@@ -223,21 +249,28 @@ func statusAsJson() string {
 		returnString += "\"mem_status\":\"mem_fail\",\"mem_percent\":"
 	}
 	returnString += fmt.Sprintf("%d,", percentMemUsed)
-	
+
 	if percentDiskUsed < diskThresholdPercent {
 		returnString += "\"disk_status\":\"disk_okay\",\"disk_percent\":"
 	} else {
 		returnString += "\"disk_status\":\"disk_fail\",\"disk_percent\":"
 	}
 	returnString += fmt.Sprintf("%d,", percentDiskUsed)
-	
-	if percentCpuUsed < cpuThresholdPercent {
+
+	if cpuResult < cpuThresholdPercent {
 		returnString += "\"cpu_status\":\"cpu_okay\",\"cpu_percent\":"
 	} else {
 		returnString += "\"cpu_status\":\"cpu_fail\",\"cpu_percent\":"
 	}
-	returnString += fmt.Sprintf("%d}", percentCpuUsed)
-	
+	returnString += fmt.Sprintf("%d,", cpuResult)
+
+	if iopsResult < diskIOPSThreshold {
+		returnString += "\"disk_iops_status\":\"disk_iops_okay\",\"disk_iops\":"
+	} else {
+		returnString += "\"disk_iops_status\":\"disk_iops_fail\",\"disk_iops\":"
+	}
+	returnString += fmt.Sprintf("%d}", iopsResult)
+
 	return returnString
 }
 
@@ -293,6 +326,74 @@ func percentDiskUsed() int {
 	availableSpace := int(availableBlocks)
 
 	return 99-int(availableSpace*100/totalSpace)
+}
+
+
+func findPrimaryDisk() string {
+	data, err := os.ReadFile("/proc/diskstats")
+	if err != nil {
+		return ""
+	}
+	for _, line := range strings.Split(string(data), "\n") {
+		fields := strings.Fields(line)
+		if len(fields) < 3 {
+			continue
+		}
+		name := fields[2]
+		if strings.HasPrefix(name, "loop") || strings.HasPrefix(name, "ram") {
+			continue
+		}
+		if _, err := os.Stat("/sys/block/" + name); err != nil {
+			continue
+		}
+		return name
+	}
+	return ""
+}
+
+func readDiskStats(device string) (reads, writes int64, err error) {
+	data, err := os.ReadFile("/proc/diskstats")
+	if err != nil {
+		return 0, 0, err
+	}
+	for _, line := range strings.Split(string(data), "\n") {
+		fields := strings.Fields(line)
+		if len(fields) < 8 {
+			continue
+		}
+		if fields[2] != device {
+			continue
+		}
+		reads, err = strconv.ParseInt(fields[3], 10, 64)
+		if err != nil {
+			return 0, 0, err
+		}
+		writes, err = strconv.ParseInt(fields[7], 10, 64)
+		if err != nil {
+			return 0, 0, err
+		}
+		return reads, writes, nil
+	}
+	return 0, 0, fmt.Errorf("device %q not found in /proc/diskstats", device)
+}
+
+func diskIOPS() int {
+	if selectedIODev == "" {
+		return -1
+	}
+	reads1, writes1, err := readDiskStats(selectedIODev)
+	if err != nil {
+		if iodev != "" {
+			log.Printf("disk IOPS warning: device %q not found in /proc/diskstats", selectedIODev)
+		}
+		return -1
+	}
+	time.Sleep(1 * time.Second)
+	reads2, writes2, err := readDiskStats(selectedIODev)
+	if err != nil {
+		return -1
+	}
+	return int((reads2 - reads1) + (writes2 - writes1))
 }
 
 
