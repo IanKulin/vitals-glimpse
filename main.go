@@ -1,7 +1,9 @@
 package main
 
 import (
+	"context"
 	"crypto/subtle"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
@@ -17,13 +19,14 @@ import (
 	"time"
 )
 
-const jsonVersion = "0.5"
+const jsonVersion = "0.6"
 const endPoint = "/vitals"
 
 var memThresholdPercent = 90
 var diskThresholdPercent = 80
 var cpuThresholdPercent = 90
 var diskIOPSThreshold = 400
+var tailscaleExpiryThreshold = 7
 var port = 10321
 
 var iodev string
@@ -36,6 +39,7 @@ var allowedNets []*net.IPNet
 var rateLimit int
 
 var runningInContainer bool
+var tailscalePresent bool
 
 type rateLimiter struct {
 	mu        sync.Mutex
@@ -158,6 +162,11 @@ func handleRequests() {
 	} else {
 		log.Println("  Disk IOPS: no device found")
 	}
+	if tailscalePresent {
+		log.Printf("  Tailscale expiry threshold: %d days", tailscaleExpiryThreshold)
+	} else {
+		log.Println("  Tailscale: not detected, expiry skipped")
+	}
 
 	server := &http.Server{
 		Addr:         addr,
@@ -178,6 +187,7 @@ func main() {
 	flag.StringVar(&allowCIDRs, "allow", "", "comma-separated CIDR allowlist (e.g. \"10.0.0.0/24,192.168.1.0/24\")")
 	flag.IntVar(&rateLimit, "ratelimit", 60, "max requests per IP per minute (0 to disable)")
 	flag.IntVar(&diskIOPSThreshold, "disk_iops", 400, "IOPS threshold for pass/fail")
+	flag.IntVar(&tailscaleExpiryThreshold, "ts_expiry", 7, "days-until-Tailscale-key-expiry threshold for pass/fail")
 	flag.StringVar(&iodev, "iodev", "", "device name to measure (e.g. sda). Auto-detected if empty.")
 	flag.Parse()
 
@@ -199,6 +209,9 @@ func main() {
 	if diskIOPSThreshold < 1 || diskIOPSThreshold > 10000000 {
 		log.Fatalf("invalid -disk_iops value %d: must be between 1 and 10000000", diskIOPSThreshold)
 	}
+	if tailscaleExpiryThreshold < 1 || tailscaleExpiryThreshold > 365 {
+		log.Fatalf("invalid -ts_expiry value %d: must be between 1 and 365", tailscaleExpiryThreshold)
+	}
 
 	if allowCIDRs != "" {
 		for _, cidr := range strings.Split(allowCIDRs, ",") {
@@ -219,6 +232,7 @@ func main() {
 	}
 
 	runningInContainer = isInContainer()
+	tailscalePresent = tailscaleSocketExists()
 
 	if iodev != "" {
 		selectedIODev = iodev
@@ -235,10 +249,13 @@ func statusAsJson() string {
 	percentDiskUsed := percentDiskUsed()
 
 	var cpuResult, iopsResult int
+	var tsDay int
+	var tsEnabled, tsAvailable bool
 	var wg sync.WaitGroup
-	wg.Add(2)
+	wg.Add(3)
 	go func() { defer wg.Done(); cpuResult = percentCpuUsed() }()
 	go func() { defer wg.Done(); iopsResult = diskIOPS() }()
+	go func() { defer wg.Done(); tsDay, tsEnabled, tsAvailable = tailscaleExpiryDays() }()
 	wg.Wait()
 
 	returnString := "{\"title\":\"vitals-glimpse\",\"version\":" + jsonVersion + ","
@@ -269,7 +286,18 @@ func statusAsJson() string {
 	} else {
 		returnString += "\"disk_iops_status\":\"disk_iops_fail\",\"disk_iops\":"
 	}
-	returnString += fmt.Sprintf("%d}", iopsResult)
+	returnString += fmt.Sprintf("%d", iopsResult)
+
+	if tsAvailable {
+		if !tsEnabled {
+			returnString += ",\"ts_expiry_status\":\"ts_expiry_okay\""
+		} else if tsDay > tailscaleExpiryThreshold {
+			returnString += fmt.Sprintf(",\"ts_expiry_status\":\"ts_expiry_okay\",\"ts_expiry_days\":%d", tsDay)
+		} else {
+			returnString += fmt.Sprintf(",\"ts_expiry_status\":\"ts_expiry_fail\",\"ts_expiry_days\":%d", tsDay)
+		}
+	}
+	returnString += "}"
 
 	return returnString
 }
@@ -522,4 +550,69 @@ func percentCpuUsed() int {
 		return percentCpuUsedCgroup()
 	}
 	return percentCpuUsedProcStat()
+}
+
+
+type tsLocalStatus struct {
+	Self struct {
+		KeyExpiry string `json:"KeyExpiry"`
+	} `json:"Self"`
+}
+
+func tailscaleSocketExists() bool {
+	_, err := os.Stat("/var/run/tailscale/tailscaled.sock")
+	return err == nil
+}
+
+// Returns (daysUntilExpiry, expiryEnabled, available).
+// available=false means tailscale is not running on this host.
+// expiryEnabled=false means key expiry is disabled (daysUntilExpiry is meaningless).
+func tailscaleExpiryDays() (days int, expiryEnabled bool, available bool) {
+	if !tailscaleSocketExists() {
+		return 0, false, false
+	}
+
+	client := &http.Client{
+		Timeout: 2 * time.Second,
+		Transport: &http.Transport{
+			DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
+				return (&net.Dialer{}).DialContext(ctx, "unix", "/var/run/tailscale/tailscaled.sock")
+			},
+		},
+	}
+
+	resp, err := client.Get("http://local-tailscaled.sock/localapi/v0/status")
+	if err != nil {
+		log.Printf("Tailscale LocalAPI warning: %v", err)
+		return 0, false, false
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		log.Printf("Tailscale LocalAPI warning: status %d", resp.StatusCode)
+		return 0, false, false
+	}
+
+	var status tsLocalStatus
+	if err := json.NewDecoder(resp.Body).Decode(&status); err != nil {
+		log.Printf("Tailscale LocalAPI warning: decode error: %v", err)
+		return 0, false, false
+	}
+
+	keyExpiry := status.Self.KeyExpiry
+	if keyExpiry == "" || keyExpiry == "0001-01-01T00:00:00Z" {
+		return 0, false, true
+	}
+
+	expiry, err := time.Parse(time.RFC3339, keyExpiry)
+	if err != nil {
+		log.Printf("Tailscale LocalAPI warning: parse KeyExpiry %q: %v", keyExpiry, err)
+		return 0, false, true
+	}
+
+	days = int(time.Until(expiry).Hours() / 24)
+	if days < 0 {
+		days = 0
+	}
+	return days, true, true
 }

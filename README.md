@@ -12,7 +12,7 @@ A sample response might be:
 ```
 {
 	"title": "vitals-glimpse",
-	"version": 0.5,
+	"version": 0.6,
 	"mem_status": "mem_okay",
 	"mem_percent": 37,
 	"disk_status": "disk_okay",
@@ -27,7 +27,7 @@ or if the thresholds are exceeded:
 ```
 {
 	"title": "vitals-glimpse",
-	"version": 0.5,
+	"version": 0.6,
 	"mem_status": "mem_fail",
 	"mem_percent": 91,
 	"disk_status": "disk_fail",
@@ -45,6 +45,7 @@ The default thresholds for the status keywords are:
 * `disk_okay` - below 80% disk usage
 * `cpu_okay` - below 90% CPU usage
 * `disk_iops_okay` - below 400 IOPS (reads + writes per second)
+* `ts_expiry_okay` / `ts_expiry_fail` - Tailscale key expiry above/below threshold (omitted if Tailscale not present)
 
 ## Command-Line Flags
 
@@ -54,6 +55,7 @@ The default thresholds for the status keywords are:
 | `-disk` | 80 | Disk usage threshold (percent) |
 | `-cpu` | 90 | CPU usage threshold (percent) |
 | `-disk_iops` | 400 | IOPS threshold (reads + writes per second) |
+| `-ts_expiry` | 7 | Days-until-Tailscale-key-expiry threshold for pass/fail |
 | `-iodev` | _(auto)_ | Device name to measure (e.g. `sda`). Auto-detected if omitted. |
 | `-port` | 10321 | Server port |
 | `-bind` | `0.0.0.0` | Address to bind to |
@@ -131,9 +133,14 @@ Run it in the background if you're not going to just ssh n and run it manually
 - `http://ct390-test:10321/vitals`
 - `ssh ian@ct390-test 'kill $(cat vitals-glimpse.pid)'`
 
+## AI Disclosure
+
+AI tools were used in later versions of this software
 
 ## Versions
+
 - 0.2 MVP
 - 0.3 Container detection for CPU, flags for thresholds
 - 0.4 Security (API key auth, IP allowlisting, rate limiting, HTTP timeouts)
-- 0.5 Disk IOPS metric (reads + writes/sec from `/proc/diskstats`, concurrent measurement)
+- 0.5 Disk IOPS metric (reads + writes/sec from `/proc/diskstats`
+- 0.6 Tailscale key expiry (`ts_expiry_status`, `ts_expiry_days`) 
