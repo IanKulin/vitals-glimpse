@@ -1,8 +1,10 @@
 {
   "cSpell.words": [
     "Bavail",
+    "diskstats",
     "Fatalf",
     "GOARCH",
+    "iodev",
     "iowait",
     "Kuma",
     "ldflags",
