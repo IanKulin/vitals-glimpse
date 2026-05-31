@@ -40,6 +40,7 @@ var rateLimit int
 
 var runningInContainer bool
 var tailscalePresent bool
+var hostname string
 
 type rateLimiter struct {
 	mu        sync.Mutex
@@ -233,6 +234,7 @@ func main() {
 
 	runningInContainer = isInContainer()
 	tailscalePresent = tailscaleSocketExists()
+	hostname = getHostname()
 
 	if iodev != "" {
 		selectedIODev = iodev
@@ -258,7 +260,7 @@ func statusAsJson() string {
 	go func() { defer wg.Done(); tsDay, tsEnabled, tsAvailable = tailscaleExpiryDays() }()
 	wg.Wait()
 
-	returnString := "{\"title\":\"vitals-glimpse\",\"version\":" + jsonVersion + ","
+	returnString := "{\"title\":\"vitals-glimpse\",\"version\":" + jsonVersion + ",\"hostname\":\"" + hostname + "\","
 
 	if percentMemUsed < memThresholdPercent {
 		returnString += "\"mem_status\":\"mem_okay\",\"mem_percent\":"
@@ -300,6 +302,21 @@ func statusAsJson() string {
 	returnString += "}"
 
 	return returnString
+}
+
+
+func getHostname() string {
+	if data, err := os.ReadFile("/etc/hostname"); err == nil {
+		if h := strings.TrimSpace(string(data)); h != "" {
+			return h
+		}
+	}
+	h, err := os.Hostname()
+	if err != nil {
+		log.Println("Warning: could not determine hostname:", err)
+		return "unknown"
+	}
+	return h
 }
 
 
