@@ -118,6 +118,7 @@ Requests exceeding the limit receive `429 Too Many Requests`.
 ### Building on MacBook
 - `GOARCH=amd64 GOOS=linux go build`
 - `GOARCH=amd64 GOOS=linux go build -ldflags="-s -w"` for distribution
+- `CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -ldflags="-s -w"` for Synology
 
 The `-s -w` flags strip debug info and symbol tables, reducing binary size by ~20-30%.
 
