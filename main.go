@@ -576,16 +576,30 @@ type tsLocalStatus struct {
 	} `json:"Self"`
 }
 
+var tailscaleSocketPaths = []string{
+	"/var/run/tailscale/tailscaled.sock",
+	"/var/packages/Tailscale/var/tailscaled.sock",
+}
+
+func tailscaleSocketPath() string {
+	for _, p := range tailscaleSocketPaths {
+		if _, err := os.Stat(p); err == nil {
+			return p
+		}
+	}
+	return ""
+}
+
 func tailscaleSocketExists() bool {
-	_, err := os.Stat("/var/run/tailscale/tailscaled.sock")
-	return err == nil
+	return tailscaleSocketPath() != ""
 }
 
 // Returns (daysUntilExpiry, expiryEnabled, available).
 // available=false means tailscale is not running on this host.
 // expiryEnabled=false means key expiry is disabled (daysUntilExpiry is meaningless).
 func tailscaleExpiryDays() (days int, expiryEnabled bool, available bool) {
-	if !tailscaleSocketExists() {
+	sockPath := tailscaleSocketPath()
+	if sockPath == "" {
 		return 0, false, false
 	}
 
@@ -593,7 +607,7 @@ func tailscaleExpiryDays() (days int, expiryEnabled bool, available bool) {
 		Timeout: 2 * time.Second,
 		Transport: &http.Transport{
 			DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
-				return (&net.Dialer{}).DialContext(ctx, "unix", "/var/run/tailscale/tailscaled.sock")
+				return (&net.Dialer{}).DialContext(ctx, "unix", sockPath)
 			},
 		},
 	}
