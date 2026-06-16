@@ -4,6 +4,7 @@
     "diskstats",
     "Fatalf",
     "GOARCH",
+    "GOARM",
     "iodev",
     "iowait",
     "Kuma",
