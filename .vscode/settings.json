@@ -8,12 +8,14 @@
     "iowait",
     "Kuma",
     "ldflags",
+    "mysecretkey",
     "nohup",
     "softirq",
     "Statfs",
     "strconv",
     "syscall",
     "syscalls",
+    "tailscaled",
     "usec"
   ]
 }
