@@ -346,8 +346,13 @@ func percentMemUsed() int {
 			}
 	}
 
-	percentAvail := float32(memStats["MemAvailable:"])*100/(float32(memStats["MemTotal:"]))
-	return 99-int(percentAvail)
+	memAvail, ok := memStats["MemAvailable:"]
+	if !ok || memAvail == 0 {
+		// MemAvailable absent (kernel < 3.14); approximate with MemFree + Buffers + Cached
+		memAvail = memStats["MemFree:"] + memStats["Buffers:"] + memStats["Cached:"]
+	}
+	percentAvail := float32(memAvail) * 100 / float32(memStats["MemTotal:"])
+	return 99 - int(percentAvail)
 }
 
 
