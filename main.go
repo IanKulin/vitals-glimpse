@@ -19,7 +19,7 @@ import (
 	"time"
 )
 
-const jsonVersion = "0.6"
+const jsonVersion = "0.7"
 const endPoint = "/vitals"
 
 var memThresholdPercent = 90
@@ -281,14 +281,16 @@ func statusAsJson() string {
 	} else {
 		returnString += "\"cpu_status\":\"cpu_fail\",\"cpu_percent\":"
 	}
-	returnString += fmt.Sprintf("%d,", cpuResult)
+	returnString += fmt.Sprintf("%d", cpuResult)
 
-	if iopsResult < diskIOPSThreshold {
-		returnString += "\"disk_iops_status\":\"disk_iops_okay\",\"disk_iops\":"
-	} else {
-		returnString += "\"disk_iops_status\":\"disk_iops_fail\",\"disk_iops\":"
+	if iopsResult >= 0 {
+		if iopsResult < diskIOPSThreshold {
+			returnString += ",\"disk_iops_status\":\"disk_iops_okay\",\"disk_iops\":"
+		} else {
+			returnString += ",\"disk_iops_status\":\"disk_iops_fail\",\"disk_iops\":"
+		}
+		returnString += fmt.Sprintf("%d", iopsResult)
 	}
-	returnString += fmt.Sprintf("%d", iopsResult)
 
 	if tsAvailable {
 		if !tsEnabled {
@@ -428,7 +430,7 @@ func readDiskStats(device string) (reads, writes int64, err error) {
 }
 
 func diskIOPS() int {
-	if selectedIODev == "" {
+	if runningInContainer || selectedIODev == "" {
 		return -1
 	}
 	reads1, writes1, err := readDiskStats(selectedIODev)

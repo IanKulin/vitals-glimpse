@@ -44,7 +44,7 @@ The default thresholds for the status keywords are:
 * `mem_okay` - below 90% memory usage
 * `disk_okay` - below 80% disk usage
 * `cpu_okay` - below 90% CPU usage
-* `disk_iops_okay` - below 400 IOPS (reads + writes per second)
+* `disk_iops_okay` - below 400 IOPS (reads + writes per second); omitted when running inside a container (LXC/Docker) since `/proc/diskstats` reflects host-level activity rather than per-container I/O
 * `ts_expiry_okay` / `ts_expiry_fail` - Tailscale key expiry above/below threshold (omitted if Tailscale not present)
 
 ## Command-Line Flags
@@ -145,4 +145,5 @@ AI tools were used in later versions of this software
 - 0.3 Container detection for CPU, flags for thresholds
 - 0.4 Security (API key auth, IP allowlisting, rate limiting, HTTP timeouts)
 - 0.5 Disk IOPS metric (reads + writes/sec from `/proc/diskstats`
-- 0.6 Tailscale key expiry (`ts_expiry_status`, `ts_expiry_days`) 
+- 0.6 Tailscale key expiry (`ts_expiry_status`, `ts_expiry_days`)
+- 0.7 IOPS omitted in containers (LXC/Docker) — `/proc/diskstats` is not namespaced and reflects host activity
