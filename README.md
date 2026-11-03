@@ -22,7 +22,9 @@ A sample response might be:
 	"disk_iops_status": "disk_iops_okay",
 	"disk_iops": 312,
 	"net_in_kbs": 123,
-	"net_out_kbs": 45
+	"net_out_kbs": 45,
+	"ts_expiry_status": "ts_expiry_okay",
+	"ts_expiry_days": 62
 }
 ```
 or if the thresholds are exceeded:
@@ -39,7 +41,9 @@ or if the thresholds are exceeded:
 	"disk_iops_status": "disk_iops_fail",
 	"disk_iops": 850,
 	"net_in_kbs": 123,
-	"net_out_kbs": 45
+	"net_out_kbs": 45,
+	"ts_expiry_status": "ts_expiry_fail",
+	"ts_expiry_days": 3
 }
 ```
 The disk usage is based on the `/` root mount point.
@@ -50,10 +54,9 @@ The default thresholds for the status keywords are:
 * `cpu_okay` - below 90% CPU usage
 * `disk_iops_okay` - below 400 IOPS (reads + writes per second); omitted when running inside a container (LXC/Docker) since `/proc/diskstats` reflects host-level activity rather than per-container I/O
 * `net_in_kbs` / `net_out_kbs` - network throughput in KB/s (1024 bytes) on the default-route interface; no status keyword or threshold, omitted if no interface is found
+* `ts_expiry_okay` - Tailscale key expiry more than 7 days away (`-ts_expiry`); `ts_expiry_fail` otherwise. `ts_expiry_days` gives the days remaining. The whole section is omitted if Tailscale is not present, and `ts_expiry_days` is omitted when key expiry is disabled.
 
 `cpu_percent`, `disk_iops` and the network figures are averages over the last 30 seconds (see `-window`), sampled in the background every 5 seconds, so a short spike will not immediately trip `cpu_fail` or `disk_iops_fail`. Requests return immediately.
-
-* `ts_expiry_okay` / `ts_expiry_fail` - Tailscale key expiry above/below threshold (omitted if Tailscale not present)
 
 ## Command-Line Flags
 
