@@ -20,7 +20,9 @@ A sample response might be:
 	"cpu_status": "cpu_okay",
 	"cpu_percent": 2,
 	"disk_iops_status": "disk_iops_okay",
-	"disk_iops": 312
+	"disk_iops": 312,
+	"net_in_kbs": 123,
+	"net_out_kbs": 45
 }
 ```
 or if the thresholds are exceeded:
@@ -35,7 +37,9 @@ or if the thresholds are exceeded:
 	"cpu_status": "cpu_fail",
 	"cpu_percent": 92,
 	"disk_iops_status": "disk_iops_fail",
-	"disk_iops": 850
+	"disk_iops": 850,
+	"net_in_kbs": 123,
+	"net_out_kbs": 45
 }
 ```
 The disk usage is based on the `/` root mount point.
@@ -45,6 +49,10 @@ The default thresholds for the status keywords are:
 * `disk_okay` - below 80% disk usage
 * `cpu_okay` - below 90% CPU usage
 * `disk_iops_okay` - below 400 IOPS (reads + writes per second); omitted when running inside a container (LXC/Docker) since `/proc/diskstats` reflects host-level activity rather than per-container I/O
+* `net_in_kbs` / `net_out_kbs` - network throughput in KB/s (1024 bytes) on the default-route interface; no status keyword or threshold, omitted if no interface is found
+
+`cpu_percent`, `disk_iops` and the network figures are averages over the last 30 seconds (see `-window`), sampled in the background every 5 seconds, so a short spike will not immediately trip `cpu_fail` or `disk_iops_fail`. Requests return immediately.
+
 * `ts_expiry_okay` / `ts_expiry_fail` - Tailscale key expiry above/below threshold (omitted if Tailscale not present)
 
 ## Command-Line Flags
@@ -57,6 +65,8 @@ The default thresholds for the status keywords are:
 | `-disk_iops` | 400 | IOPS threshold (reads + writes per second) |
 | `-ts_expiry` | 7 | Days-until-Tailscale-key-expiry threshold for pass/fail |
 | `-iodev` | _(auto)_ | Device name to measure (e.g. `sda`). Auto-detected if omitted. |
+| `-iface` | _(auto)_ | Network interface to measure (e.g. `eth0`). Auto-detected from the default route if omitted. |
+| `-window` | 30 | Averaging window in seconds for CPU, IOPS and network rates (multiple of 5, 5-60) |
 | `-port` | 10321 | Server port |
 | `-bind` | `0.0.0.0` | Address to bind to |
 | `-key` | _(none)_ | API key required via `X-API-Key` request header |
@@ -147,3 +157,4 @@ AI tools were used in later versions of this software
 - 0.5 Disk IOPS metric (reads + writes/sec from `/proc/diskstats`
 - 0.6 Tailscale key expiry (`ts_expiry_status`, `ts_expiry_days`)
 - 0.7 IOPS omitted in containers (LXC/Docker) — `/proc/diskstats` is not namespaced and reflects host activity
+- 0.8 Background 5s sampling with windowed averages for CPU/IOPS; network throughput (`net_in_kbs`, `net_out_kbs`); `-iface` and `-window` flags

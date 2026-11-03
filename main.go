@@ -19,7 +19,7 @@ import (
 	"time"
 )
 
-const jsonVersion = "0.7"
+const jsonVersion = "0.8"
 const endPoint = "/vitals"
 
 var memThresholdPercent = 90
@@ -31,6 +31,11 @@ var port = 10321
 
 var iodev string
 var selectedIODev string
+
+var netIface string
+var selectedNetIface string
+var windowSeconds = 30
+var useCgroupCPU bool
 
 var bindAddr = "0.0.0.0"
 var apiKey string
@@ -163,6 +168,12 @@ func handleRequests() {
 	} else {
 		log.Println("  Disk IOPS: no device found")
 	}
+	log.Printf("  Rate averaging window: %ds", windowSeconds)
+	if selectedNetIface != "" {
+		log.Printf("  Network interface: %s", selectedNetIface)
+	} else {
+		log.Println("  Network: no interface found")
+	}
 	if tailscalePresent {
 		log.Printf("  Tailscale expiry threshold: %d days", tailscaleExpiryThreshold)
 	} else {
@@ -190,6 +201,8 @@ func main() {
 	flag.IntVar(&diskIOPSThreshold, "disk_iops", 400, "IOPS threshold for pass/fail")
 	flag.IntVar(&tailscaleExpiryThreshold, "ts_expiry", 7, "days-until-Tailscale-key-expiry threshold for pass/fail")
 	flag.StringVar(&iodev, "iodev", "", "device name to measure (e.g. sda). Auto-detected if empty.")
+	flag.StringVar(&netIface, "iface", "", "network interface to measure (e.g. eth0). Auto-detected from default route if empty.")
+	flag.IntVar(&windowSeconds, "window", 30, "averaging window in seconds for rate metrics (multiple of 5, 5-60)")
 	flag.Parse()
 
 	if memThresholdPercent < 1 || memThresholdPercent > 100 {
@@ -212,6 +225,9 @@ func main() {
 	}
 	if tailscaleExpiryThreshold < 1 || tailscaleExpiryThreshold > 365 {
 		log.Fatalf("invalid -ts_expiry value %d: must be between 1 and 365", tailscaleExpiryThreshold)
+	}
+	if !validWindow(windowSeconds) {
+		log.Fatalf("invalid -window value %d: must be a multiple of 5 between 5 and 60", windowSeconds)
 	}
 
 	if allowCIDRs != "" {
@@ -242,6 +258,21 @@ func main() {
 		selectedIODev = findPrimaryDisk()
 	}
 
+	if netIface != "" {
+		selectedNetIface = netIface
+	} else {
+		selectedNetIface = findDefaultRouteIface()
+	}
+	if selectedNetIface != "" {
+		if _, _, err := readNetStats(selectedNetIface); err != nil {
+			log.Printf("network warning: %v", err)
+			selectedNetIface = ""
+		}
+	}
+
+	useCgroupCPU = runningInContainer && hasCgroupCPUStats()
+
+	startSampler()
 	handleRequests()
 }
 
@@ -250,15 +281,20 @@ func statusAsJson() string {
 	percentMemUsed := percentMemUsed()
 	percentDiskUsed := percentDiskUsed()
 
-	var cpuResult, iopsResult int
-	var tsDay int
-	var tsEnabled, tsAvailable bool
-	var wg sync.WaitGroup
-	wg.Add(3)
-	go func() { defer wg.Done(); cpuResult = percentCpuUsed() }()
-	go func() { defer wg.Done(); iopsResult = diskIOPS() }()
-	go func() { defer wg.Done(); tsDay, tsEnabled, tsAvailable = tailscaleExpiryDays() }()
-	wg.Wait()
+	cpuResult, iopsResult, netIn, netOut := -1, -1, -1, -1
+	if oldest, newest, ok := sampler.window(); ok {
+		if useCgroupCPU {
+			cpuResult = cpuPercentCgroup(oldest, newest)
+		} else {
+			cpuResult = cpuPercentProcStat(oldest, newest)
+		}
+		iopsResult = iops(oldest, newest)
+		netIn, netOut = netKBs(oldest, newest)
+	}
+	if cpuResult < 0 {
+		cpuResult = 0
+	}
+	tsDay, tsEnabled, tsAvailable := tailscaleExpiryDays()
 
 	returnString := "{\"title\":\"vitals-glimpse\",\"version\":" + jsonVersion + ",\"hostname\":\"" + hostname + "\","
 
@@ -290,6 +326,10 @@ func statusAsJson() string {
 			returnString += ",\"disk_iops_status\":\"disk_iops_fail\",\"disk_iops\":"
 		}
 		returnString += fmt.Sprintf("%d", iopsResult)
+	}
+
+	if netIn >= 0 && netOut >= 0 {
+		returnString += fmt.Sprintf(",\"net_in_kbs\":%d,\"net_out_kbs\":%d", netIn, netOut)
 	}
 
 	if tsAvailable {
@@ -429,25 +469,6 @@ func readDiskStats(device string) (reads, writes int64, err error) {
 	return 0, 0, fmt.Errorf("device %q not found in /proc/diskstats", device)
 }
 
-func diskIOPS() int {
-	if runningInContainer || selectedIODev == "" {
-		return -1
-	}
-	reads1, writes1, err := readDiskStats(selectedIODev)
-	if err != nil {
-		if iodev != "" {
-			log.Printf("disk IOPS warning: device %q not found in /proc/diskstats", selectedIODev)
-		}
-		return -1
-	}
-	time.Sleep(1 * time.Second)
-	reads2, writes2, err := readDiskStats(selectedIODev)
-	if err != nil {
-		return -1
-	}
-	return int((reads2 - reads1) + (writes2 - writes1))
-}
-
 
 func parseCPUFields(fields []string) (user, nice, system, idle, iowait, irq, softirq, steal int) {
 	user, _ = strconv.Atoi(fields[1])
@@ -532,48 +553,205 @@ func getCGroupCPUUsage() (int64, error) {
 	return 0, nil
 }
 
-func percentCpuUsedCgroup() int {
-	usageStart, _ := getCGroupCPUUsage()
-	time.Sleep(1 * time.Second)
-	usageEnd, _ := getCGroupCPUUsage()
+func hasCgroupCPUStats() bool {
+	_, err := os.ReadFile("/sys/fs/cgroup/cpu.stat")
+	return err == nil
+}
 
-	usageDelta := usageEnd - usageStart
-	numCPUs := runtime.NumCPU()
-	
-	usage := int(100 * float64(usageDelta) / (1000000.0 * float64(numCPUs)))
+// Network
+
+func findDefaultRouteIface() string {
+	data, err := os.ReadFile("/proc/net/route")
+	if err != nil {
+		return ""
+	}
+	best := ""
+	bestMetric := -1
+	for i, line := range strings.Split(string(data), "\n") {
+		if i == 0 {
+			continue // header
+		}
+		fields := strings.Fields(line)
+		if len(fields) < 7 || fields[1] != "00000000" {
+			continue
+		}
+		metric, err := strconv.Atoi(fields[6])
+		if err != nil {
+			continue
+		}
+		if bestMetric < 0 || metric < bestMetric {
+			best, bestMetric = fields[0], metric
+		}
+	}
+	return best
+}
+
+func readNetStats(iface string) (rx, tx uint64, err error) {
+	data, err := os.ReadFile("/proc/net/dev")
+	if err != nil {
+		return 0, 0, err
+	}
+	for _, line := range strings.Split(string(data), "\n") {
+		name, rest, found := strings.Cut(line, ":")
+		if !found || strings.TrimSpace(name) != iface {
+			continue
+		}
+		fields := strings.Fields(rest)
+		if len(fields) < 9 {
+			return 0, 0, fmt.Errorf("unexpected /proc/net/dev format for %q", iface)
+		}
+		rx, err = strconv.ParseUint(fields[0], 10, 64)
+		if err != nil {
+			return 0, 0, err
+		}
+		tx, err = strconv.ParseUint(fields[8], 10, 64)
+		if err != nil {
+			return 0, 0, err
+		}
+		return rx, tx, nil
+	}
+	return 0, 0, fmt.Errorf("interface %q not found in /proc/net/dev", iface)
+}
+
+// Background sampling
+
+const sampleInterval = 5 * time.Second
+
+type sample struct {
+	t                 time.Time
+	cpuOK             bool
+	cpuIdle, cpuTotal int    // /proc/stat
+	cgroupUsec        int64  // cpu.stat usage_usec
+	diskOK            bool
+	reads, writes     int64  // /proc/diskstats
+	netOK             bool
+	rxBytes, txBytes  uint64 // /proc/net/dev
+}
+
+type sampleHistory struct {
+	mu      sync.Mutex
+	samples []sample
+}
+
+var sampler = &sampleHistory{}
+
+func validWindow(w int) bool {
+	return w >= 5 && w <= 60 && w%5 == 0
+}
+
+func takeSample() sample {
+	s := sample{t: time.Now()}
+
+	if useCgroupCPU {
+		if usec, err := getCGroupCPUUsage(); err == nil {
+			s.cpuOK, s.cgroupUsec = true, usec
+		}
+	} else {
+		// getCPUTimes returns zeros on a failed read
+		if idle, total := getCPUTimes(); total > 0 {
+			s.cpuOK, s.cpuIdle, s.cpuTotal = true, idle, total
+		}
+	}
+
+	if !runningInContainer && selectedIODev != "" {
+		if r, w, err := readDiskStats(selectedIODev); err == nil {
+			s.diskOK, s.reads, s.writes = true, r, w
+		}
+	}
+
+	if selectedNetIface != "" {
+		if rx, tx, err := readNetStats(selectedNetIface); err == nil {
+			s.netOK, s.rxBytes, s.txBytes = true, rx, tx
+		}
+	}
+	return s
+}
+
+func (h *sampleHistory) add(s sample, keep int) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.samples = append(h.samples, s)
+	if len(h.samples) > keep {
+		h.samples = h.samples[1:]
+	}
+}
+
+// pickWindow returns the newest sample and the one n ticks before it,
+// clamped to the oldest sample held. ok is false with fewer than two samples.
+func pickWindow(samples []sample, n int) (oldest, newest sample, ok bool) {
+	if len(samples) < 2 {
+		return sample{}, sample{}, false
+	}
+	last := len(samples) - 1
+	return samples[last-min(n, last)], samples[last], true
+}
+
+func (h *sampleHistory) window() (oldest, newest sample, ok bool) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return pickWindow(h.samples, windowSeconds/int(sampleInterval/time.Second))
+}
+
+func startSampler() {
+	keep := windowSeconds/int(sampleInterval/time.Second) + 1
+	sampler.add(takeSample(), keep)
+	time.Sleep(1 * time.Second)
+	sampler.add(takeSample(), keep)
+
+	go func() {
+		ticker := time.NewTicker(sampleInterval)
+		for range ticker.C {
+			sampler.add(takeSample(), keep)
+		}
+	}()
+}
+
+// Rate functions. All return -1 when the rate can't be computed.
+
+func cpuPercentProcStat(a, b sample) int {
+	if !a.cpuOK || !b.cpuOK || !b.t.After(a.t) {
+		return -1
+	}
+	if b.cpuTotal < a.cpuTotal || b.cpuIdle < a.cpuIdle {
+		return -1
+	}
+	totalDelta := b.cpuTotal - a.cpuTotal
+	if totalDelta == 0 {
+		return 0
+	}
+	idleDelta := b.cpuIdle - a.cpuIdle
+	return int(100 * float64(totalDelta-idleDelta) / float64(totalDelta))
+}
+
+func cpuPercentCgroup(a, b sample) int {
+	elapsed := b.t.Sub(a.t)
+	if !a.cpuOK || !b.cpuOK || elapsed <= 0 || b.cgroupUsec < a.cgroupUsec {
+		return -1
+	}
+	elapsedUsec := float64(elapsed.Microseconds())
+	usage := int(100 * float64(b.cgroupUsec-a.cgroupUsec) / (elapsedUsec * float64(runtime.NumCPU())))
 	if usage > 100 {
 		usage = 100
 	}
 	return usage
 }
 
-func percentCpuUsedProcStat() int {
-	idleStart, totalStart := getCPUTimes()
-	time.Sleep(1 * time.Second)
-	idleEnd, totalEnd := getCPUTimes()
-
-	idleDelta := idleEnd - idleStart
-	totalDelta := totalEnd - totalStart
-
-	if totalDelta == 0 {
-		return 0
+func iops(a, b sample) int {
+	elapsed := b.t.Sub(a.t).Seconds()
+	if !a.diskOK || !b.diskOK || elapsed <= 0 || b.reads < a.reads || b.writes < a.writes {
+		return -1
 	}
-	
-	usage := int(100 * float64(totalDelta-idleDelta) / float64(totalDelta))
-	return usage
+	return int(float64((b.reads-a.reads)+(b.writes-a.writes)) / elapsed)
 }
 
-func hasCgroupCPUStats() bool {
-	_, err := os.ReadFile("/sys/fs/cgroup/cpu.stat")
-	return err == nil
-}
-
-func percentCpuUsed() int {
-	// Use cgroup stats in containers if available, /proc/stat otherwise
-	if runningInContainer && hasCgroupCPUStats() {
-		return percentCpuUsedCgroup()
+func netKBs(a, b sample) (in, out int) {
+	elapsed := b.t.Sub(a.t).Seconds()
+	if !a.netOK || !b.netOK || elapsed <= 0 || b.rxBytes < a.rxBytes || b.txBytes < a.txBytes {
+		return -1, -1
 	}
-	return percentCpuUsedProcStat()
+	in = int(float64(b.rxBytes-a.rxBytes) / 1024 / elapsed)
+	out = int(float64(b.txBytes-a.txBytes) / 1024 / elapsed)
+	return in, out
 }
 
 
