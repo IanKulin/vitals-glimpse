@@ -137,11 +137,9 @@ func rateCheck(next http.HandlerFunc) http.HandlerFunc {
 	}
 }
 
-
 func serveStats(resp http.ResponseWriter, req *http.Request) {
-    io.WriteString(resp, statusAsJson())
+	io.WriteString(resp, statusAsJson())
 }
-
 
 func handleRequests() {
 	handler := requireAllowedIP(rateCheck(requireKey(serveStats)))
@@ -276,7 +274,6 @@ func main() {
 	handleRequests()
 }
 
-
 func statusAsJson() string {
 	percentMemUsed := percentMemUsed()
 	percentDiskUsed := percentDiskUsed()
@@ -346,7 +343,6 @@ func statusAsJson() string {
 	return returnString
 }
 
-
 func getHostname() string {
 	if data, err := os.ReadFile("/etc/hostname"); err == nil {
 		if h := strings.TrimSpace(string(data)); h != "" {
@@ -361,13 +357,11 @@ func getHostname() string {
 	return h
 }
 
-
 func parseInt(s string) int {
 	var value int
 	fmt.Sscanf(s, "%d", &value)
 	return value
 }
-
 
 func percentMemUsed() int {
 	memInfo, err := os.ReadFile("/proc/meminfo")
@@ -380,12 +374,12 @@ func percentMemUsed() int {
 	memStats := make(map[string]int)
 
 	for _, line := range memInfoLines {
-			parts := strings.Fields(line)
-			if len(parts) >= 2 {
-				key := parts[0]
-				value := parts[1]
-				memStats[key] = parseInt(value)
-			}
+		parts := strings.Fields(line)
+		if len(parts) >= 2 {
+			key := parts[0]
+			value := parts[1]
+			memStats[key] = parseInt(value)
+		}
 	}
 
 	memAvail, ok := memStats["MemAvailable:"]
@@ -396,7 +390,6 @@ func percentMemUsed() int {
 	percentAvail := float32(memAvail) * 100 / float32(memStats["MemTotal:"])
 	return 99 - int(percentAvail)
 }
-
 
 func percentDiskUsed() int {
 	var stat syscall.Statfs_t
@@ -417,9 +410,8 @@ func percentDiskUsed() int {
 	}
 	availableSpace := int(availableBlocks)
 
-	return 99-int(availableSpace*100/totalSpace)
+	return 99 - int(availableSpace*100/totalSpace)
 }
-
 
 func findPrimaryDisk() string {
 	data, err := os.ReadFile("/proc/diskstats")
@@ -468,7 +460,6 @@ func readDiskStats(device string) (reads, writes int64, err error) {
 	}
 	return 0, 0, fmt.Errorf("device %q not found in /proc/diskstats", device)
 }
-
 
 func parseCPUFields(fields []string) (user, nice, system, idle, iowait, irq, softirq, steal int) {
 	user, _ = strconv.Atoi(fields[1])
@@ -620,10 +611,10 @@ const sampleInterval = 5 * time.Second
 type sample struct {
 	t                 time.Time
 	cpuOK             bool
-	cpuIdle, cpuTotal int    // /proc/stat
-	cgroupUsec        int64  // cpu.stat usage_usec
+	cpuIdle, cpuTotal int   // /proc/stat
+	cgroupUsec        int64 // cpu.stat usage_usec
 	diskOK            bool
-	reads, writes     int64  // /proc/diskstats
+	reads, writes     int64 // /proc/diskstats
 	netOK             bool
 	rxBytes, txBytes  uint64 // /proc/net/dev
 }
@@ -753,7 +744,6 @@ func netKBs(a, b sample) (in, out int) {
 	out = int(float64(b.txBytes-a.txBytes) / 1024 / elapsed)
 	return in, out
 }
-
 
 type tsLocalStatus struct {
 	Self struct {
